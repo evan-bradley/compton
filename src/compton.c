@@ -879,6 +879,9 @@ paint_root(session_t *ps, XserverRegion reg_paint) {
 
   win_render(ps, NULL, 0, 0, ps->root_width, ps->root_height, 1.0, reg_paint,
       NULL, ps->root_tile_paint.pict);
+
+  //render_map(ps, 0, 0, 0, 0, (int) ps->root_width / 1, (int) ps->root_height / 1, 1.0,
+  //           ps->o.force_win_blend, ps->root_tile_paint.pict);
 }
 
 /**
@@ -887,11 +890,12 @@ paint_root(session_t *ps, XserverRegion reg_paint) {
 static XserverRegion
 win_get_region(session_t *ps, win *w, bool use_offset) {
   XRectangle r;
+  double scale = ps->o.wintype_scale[w->window_type] ? ps->scale : 1.0;
 
-  r.x = (use_offset ? w->a.x: 0);
-  r.y = (use_offset ? w->a.y: 0);
-  r.width = w->widthb;
-  r.height = w->heightb;
+  r.x = ((use_offset ? w->a.x: 0) / scale);
+  r.y = ((use_offset ? w->a.y: 0) / scale);
+  r.width = w->widthb / scale;
+  r.height = w->heightb / scale;
 
   return XFixesCreateRegion(ps->dpy, &r, 1);
 }
@@ -903,17 +907,18 @@ static XserverRegion
 win_get_region_noframe(session_t *ps, win *w, bool use_offset) {
   const margin_t extents = win_calc_frame_extents(ps, w);
   XRectangle r;
+  double scale = ps->o.wintype_scale[w->window_type] ? ps->scale : 1.0;
 
-  r.x = (use_offset ? w->a.x: 0) + extents.left;
-  r.y = (use_offset ? w->a.y: 0) + extents.top;
-  r.width = max_i(w->a.width - extents.left - extents.right, 0);
-  r.height = max_i(w->a.height - extents.top - extents.bottom, 0);
+  r.x = ((use_offset ? w->a.x: 0) + extents.left) / scale;
+  r.y = ((use_offset ? w->a.y: 0) + extents.top) / scale;
+  r.width = max_i(w->a.width - extents.left - extents.right, 0) / scale;
+  r.height = max_i(w->a.height - extents.top - extents.bottom, 0) / scale;
 
   if (r.width > 0 && r.height > 0)
     return XFixesCreateRegion(ps->dpy, &r, 1);
   else
-    return XFixesCreateRegion(ps->dpy, NULL, 0);
-}
+    return XFixesCreateRegion(ps->dpy, NULL, 0);}
+
 
 /**
  * Get a rectangular region a window (and possibly its shadow) occupies.
@@ -924,19 +929,20 @@ win_get_region_noframe(session_t *ps, win *w, bool use_offset) {
 static XserverRegion
 win_extents(session_t *ps, win *w) {
   XRectangle r;
+  double scale = ps->o.wintype_scale[w->window_type] ? ps->scale : 1.0;
 
-  r.x = w->a.x;
-  r.y = w->a.y;
-  r.width = w->widthb;
-  r.height = w->heightb;
+  r.x = w->a.x / scale;
+  r.y = w->a.y / scale;
+  r.width = w->widthb / scale;
+  r.height = w->heightb / scale;
 
   if (w->shadow) {
     XRectangle sr;
 
-    sr.x = w->a.x + w->shadow_dx;
-    sr.y = w->a.y + w->shadow_dy;
-    sr.width = w->shadow_width;
-    sr.height = w->shadow_height;
+    sr.x = (w->a.x + w->shadow_dx) / scale;
+    sr.y = (w->a.y + w->shadow_dy) / scale;
+    sr.width = (w->shadow_width) / scale;
+    sr.height = (w->shadow_height) / scale;
 
     if (sr.x < r.x) {
       r.width = (r.x + r.width) - sr.x;
@@ -967,6 +973,7 @@ static XserverRegion
 border_size(session_t *ps, win *w, bool use_offset) {
   // Start with the window rectangular region
   XserverRegion fin = win_get_region(ps, w, use_offset);
+  double scale = ps->o.wintype_scale[w->window_type] ? ps->scale : 1.0;
 
   // Only request for a bounding region if the window is shaped
   if (w->bounding_shaped) {
@@ -987,8 +994,8 @@ border_size(session_t *ps, win *w, bool use_offset) {
     if (use_offset) {
       // Translate the region to the correct place
       XFixesTranslateRegion(ps->dpy, border,
-        w->a.x + w->a.border_width,
-        w->a.y + w->a.border_width);
+        (w->a.x + w->a.border_width) / scale,
+                            (w->a.y + w->a.border_width) / scale);
     }
 
     // Intersect the bounding region we got with the window rectangle, to
@@ -1114,16 +1121,16 @@ paint_preprocess(session_t *ps, win *list) {
         free_paint(ps, &w->shadow_paint);
 
       // Destroy reg_ignore on all windows if they should expire
-      if (ps->reg_ignore_expire)
+      if (ps->reg_ignore_expire || ps->scale_changed)
         free_region(ps, &w->reg_ignore);
     }
 
     // Restore flags from last paint if the window is being faded out
     if (IsUnmapped == w->a.map_state) {
-      win_set_shadow(ps, w, w->shadow_last);
+      //win_set_shadow(ps, w, w->shadow_last);
       w->fade = w->fade_last;
       win_set_invert_color(ps, w, w->invert_color_last);
-      win_set_blur_background(ps, w, w->blur_background_last);
+      //win_set_blur_background(ps, w, w->blur_background_last);
     }
 
     // Update window opacity target and dim state if asked
@@ -1141,8 +1148,8 @@ paint_preprocess(session_t *ps, win *list) {
     // pixmap is gone (for example due to a ConfigureNotify), or when it's
     // excluded
     if (!w->damaged
-        || w->a.x + w->a.width < 1 || w->a.y + w->a.height < 1
-        || w->a.x >= ps->root_width || w->a.y >= ps->root_height
+        // || w->a.x + w->a.width < 1 || w->a.y + w->a.height < 1
+        // || w->a.x >= ps->root_width || w->a.y >= ps->root_height
         || ((IsUnmapped == w->a.map_state || w->destroyed) && !w->paint.pixmap)
         || get_alpha_pict_o(ps, w->opacity) == ps->alpha_picts[0]
         || w->paint_excluded)
@@ -1156,11 +1163,11 @@ paint_preprocess(session_t *ps, win *list) {
 
     if (to_paint) {
       // Fetch bounding region
-      if (!w->border_size)
-        w->border_size = border_size(ps, w, true);
+      //if (!w->border_size)
+      //  w->border_size = border_size(ps, w, true);
 
       // Fetch window extents
-      if (!w->extents)
+      if (!w->extents || ps->scale_changed)
         w->extents = win_extents(ps, w);
 
       // Calculate frame_opacity
@@ -1207,7 +1214,7 @@ paint_preprocess(session_t *ps, win *list) {
         // ignored region
         if (win_is_solid(ps, w)) {
           if (!w->frame_opacity) {
-            if (w->border_size)
+            if (w->border_size && !ps->scale_changed)
               w->reg_ignore = copy_region(ps, w->border_size);
             else
               w->reg_ignore = win_get_region(ps, w, true);
@@ -1506,6 +1513,7 @@ win_blur_background(session_t *ps, win *w, Picture tgt_buffer,
           reg_paint, pcache_reg, &w->glx_blur_cache);
       break;
 #endif
+    case NUM_BKEND:
     default:
       assert(0);
   }
@@ -1527,8 +1535,19 @@ render_(session_t *ps, int x, int y, int dx, int dy, int wid, int hei,
         Picture alpha_pict = get_alpha_pict_d(ps, opacity);
         if (alpha_pict != ps->alpha_picts[0]) {
           int op = ((!argb && !alpha_pict) ? PictOpSrc: PictOpOver);
+
           XRenderComposite(ps->dpy, op, pict, alpha_pict,
               ps->tgt_buffer.pict, x, y, 0, 0, dx, dy, wid, hei);
+
+          //printf("x: %d, y: %d, dx: %d, dy: %d, wid: %d, hei: %d\n",
+          //       x, y, dx, dy, wid, hei);
+
+          /*XTransform xform = {{
+              { XDoubleToFixed( map_scale ), XDoubleToFixed( 0 ), XDoubleToFixed( 0 ) },
+              { XDoubleToFixed( 0 ), XDoubleToFixed( map_scale ), XDoubleToFixed( 0 ) },
+              { XDoubleToFixed( 0 ), XDoubleToFixed( 0 ), XDoubleToFixed(1.0) }
+            }};
+            XRenderSetPictureTransform(ps->dpy, pict, &xform);*/
         }
         break;
       }
@@ -1539,10 +1558,28 @@ render_(session_t *ps, int x, int y, int dx, int dy, int wid, int hei,
       ps->psglx->z += 1;
       break;
 #endif
+    case NUM_BKEND:
     default:
       assert(0);
   }
 }
+
+#ifdef MINI_MAP
+static void
+render_map(session_t *ps, int x, int y, int dx, int dy, int wid, int hei,
+           double opacity, bool argb, Picture pict) {
+  //Picture alpha_pict = get_alpha_pict_d(ps, opacity);
+  //if (alpha_pict != ps->alpha_picts[0]) {
+    //int op = ((!argb && !alpha_pict) ? PictOpSrc: PictOpOver);
+
+    //printf("x: %d, y: %d, dx: %d, dy: %d, wid: %d, hei: %d\n",
+    //       x, y, dx, dy, wid, hei);
+
+    XRenderComposite(ps->dpy, PictOpSrc, pict, None,
+      map_buffer_pic, x, y, 0, 0, dx, dy, wid, hei);
+    //}
+}
+#endif
 
 /**
  * Paint a window itself and dim it if asked.
@@ -1550,6 +1587,8 @@ render_(session_t *ps, int x, int y, int dx, int dy, int wid, int hei,
 static inline void
 win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
     const reg_data_t *pcache_reg) {
+  double scale = ps->o.wintype_scale[w->window_type] ? ps->scale : 1.0;
+
   glx_mark(ps, w->id, true);
 
   // Fetch Pixmap
@@ -1565,7 +1604,7 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
     draw = w->id;
 
   // XRender: Build picture
-  if (bkend_use_xrender(ps) && !w->paint.pict) {
+  if ((bkend_use_xrender(ps) && !w->paint.pict) || ps->scale_changed) {
     {
       XRenderPictureAttributes pa = {
         .subwindow_mode = IncludeInferiors,
@@ -1573,6 +1612,61 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
 
       w->paint.pict = XRenderCreatePicture(ps->dpy, draw, w->pictfmt,
           CPSubwindowMode, &pa);
+
+      if(scale > 1.0) {
+        XTransform xform = {{
+            { XDoubleToFixed( 1.0 ), XDoubleToFixed( 0 ), XDoubleToFixed( 0 ) },
+            { XDoubleToFixed( 0 ), XDoubleToFixed( 1.0 ), XDoubleToFixed( 0 ) },
+            { XDoubleToFixed( 0 ), XDoubleToFixed( 0 ), XDoubleToFixed( 1 / scale ) }
+          }};
+        XRenderSetPictureTransform(ps->dpy, w->paint.pict, &xform);
+        XRenderSetPictureFilter(ps->dpy, w->paint.pict, FilterBilinear, 0, 0);
+      }
+
+#ifdef MINI_MAP
+      w->paint_map.pict = XRenderCreatePicture(ps->dpy, draw, w->pictfmt,
+                                           CPSubwindowMode, &pa);
+
+      if(map_scale > 1.0) {
+        XTransform xform = {{
+            { XDoubleToFixed( 1.0 ), XDoubleToFixed( 0 ), XDoubleToFixed( 0 ) },
+            { XDoubleToFixed( 0 ), XDoubleToFixed( 1.0 ), XDoubleToFixed( 0 ) },
+            { XDoubleToFixed( 0 ), XDoubleToFixed( 0 ), XDoubleToFixed( 1 / map_scale ) }
+          }};
+        XRenderSetPictureTransform(ps->dpy, w->paint_map.pict, &xform);
+        XRenderSetPictureFilter(ps->dpy, w->paint_map.pict, FilterBilinear, 0, 0);
+      }
+#endif
+
+      /*Picture picture;
+      XRenderPictureAttributes pa_clip;
+      XRenderColor c;
+
+      Pixmap clip_pixmap = XCreatePixmap(ps->dpy, ps->root,
+                                         w->a.width / map_scale, w->a.height / map_scale, 1);
+      pa.repeat = True;
+      picture = XRenderCreatePicture(ps->dpy, clip_pixmap,
+                                     XRenderFindStandardFormat(ps->dpy, PictStandardA8),
+                                     CPRepeat,
+                                     &pa_clip);
+
+      c.alpha = 1 * 0xffff;
+      c.red =   1 * 0xffff;
+      c.green = 1 * 0xffff;
+      c.blue =  1 * 0xffff;
+
+      XRenderFillRectangle(ps->dpy, PictOpSrc, picture, &c, 0, 0, 1, 1);
+      //XFreePixmap(ps->dpy, pixmap);
+
+      XRenderPictureAttributes map_pa = {
+        .clip_mask = clip_pixmap,
+        .clip_x_origin = 0,
+        .clip_y_origin = 0,
+        };
+
+      XRenderChangePicture(ps->dpy, w->paint_map.pict,
+      (CPClipXOrigin & CPClipYOrigin & CPClipMask), &map_pa);*/
+
     }
   }
 
@@ -1600,6 +1694,9 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
   const int hei = w->heightb;
 
   Picture pict = w->paint.pict;
+#ifdef MINI_MAP
+  Picture map_pict = w->paint_map.pict;
+#endif
 
   // Invert window color, if required
   if (bkend_use_xrender(ps) && w->invert_color) {
@@ -1629,7 +1726,32 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
   const double dopacity = get_opacity_percent(w);
 
   if (!w->frame_opacity) {
-    win_render(ps, w, 0, 0, wid, hei, dopacity, reg_paint, pcache_reg, pict);
+    win_render(ps,
+               w,
+               0,
+               0,
+               (int) wid / scale,
+               (int) hei / scale,
+               dopacity,
+               reg_paint,
+               pcache_reg,
+               pict);
+
+#ifdef MINI_MAP
+    if (w->id != mini_map) {
+      const bool argb = (w && (WMODE_ARGB == w->mode || ps->o.force_win_blend));
+      render_map(ps,
+                0,
+                0,
+                (x / map_scale) + (ps->root_width / 2) - (ps->root_width / (map_scale * 2)),
+                (y / map_scale) + (ps->root_height / 2) - (ps->root_height / (map_scale * 2)),
+                wid / map_scale,
+                hei / map_scale,
+                dopacity,
+                argb,
+                map_pict);
+    }
+#endif
   }
   else {
     // Painting parameters
@@ -1677,6 +1799,19 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
           if (pwid > 0) {
             // body
             win_render(ps, w, l, t, pwid, phei, dopacity, reg_paint, pcache_reg, pict);
+            printf("l: %d, t: %d\n", l, t);
+
+            /*const bool argb = (w && (WMODE_ARGB == w->mode || ps->o.force_win_blend));
+            render_map(ps,
+                       (int) l / 1,
+                       (int) t / 1,
+                       (int) x / map_scale,
+                       (int) y / map_scale,
+                       (int) pwid / map_scale,
+                       (int) phei / map_scale,
+                       dopacity,
+                       argb,
+                       map_pict);*/
           }
         }
       }
@@ -1687,6 +1822,11 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
 
   if (pict != w->paint.pict)
     free_picture(ps, &pict);
+
+#ifdef MINI_MAP
+  if (map_pict != w->paint_map.pict)
+    free_picture(ps, &map_pict);
+#endif
 
   // Dimming the window if needed
   if (w->dim) {
@@ -1722,6 +1862,10 @@ win_paint_win(session_t *ps, win *w, XserverRegion reg_paint,
             reg_paint, pcache_reg);
         break;
 #endif
+      case NUM_BKEND:
+      default:
+        assert(0);
+        break;
     }
   }
 
@@ -1764,7 +1908,8 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
   }
 #endif
 
-  if (!region) {
+  //map_region = get_map_region(ps);
+  if (!region || ps->scale_changed) {
     region_real = region = get_screen_region(ps);
   }
   else {
@@ -1791,18 +1936,32 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
         free_paint(ps, &ps->tgt_buffer);
         ps->tgt_buffer.pixmap = XCreatePixmap(ps->dpy, ps->root,
             ps->root_width, ps->root_height, ps->depth);
+
+#ifdef MINI_MAP
+        map_pixmap = XCreatePixmap(ps->dpy, mini_map,
+          ps->root_width, ps->root_height, ps->depth);
+#endif
       }
 
-      if (BKEND_GLX != ps->o.backend)
+      if (BKEND_GLX != ps->o.backend) {
         ps->tgt_buffer.pict = XRenderCreatePicture(ps->dpy,
             ps->tgt_buffer.pixmap, XRenderFindVisualFormat(ps->dpy, ps->vis),
             0, 0);
+#ifdef MINI_MAP
+        map_buffer_pic = XRenderCreatePicture(ps->dpy,
+            map_pixmap, XRenderFindVisualFormat(ps->dpy, ps->vis),
+            0, 0);
+#endif
+      }
     }
   }
 #endif
 
-  if (BKEND_XRENDER == ps->o.backend)
+  if (BKEND_XRENDER == ps->o.backend) {
     XFixesSetPictureClipRegion(ps->dpy, ps->tgt_picture, 0, 0, region_real);
+    //XFixesSetPictureClipRegion(ps->dpy, map_picture, 0, 0, map_region);
+  }
+
 
 #ifdef MONITOR_REPAINT
   switch (ps->o.backend) {
@@ -1820,11 +1979,12 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
   }
 #endif
 
-  if (t && t->reg_ignore) {
+  if (t && t->reg_ignore && !ps->scale_changed) {
     // Calculate the region upon which the root window is to be painted
     // based on the ignore region of the lowest window, if available
     reg_paint = reg_tmp = XFixesCreateRegion(ps->dpy, NULL, 0);
     XFixesSubtractRegion(ps->dpy, reg_paint, region, t->reg_ignore);
+    //XFixesSubtractRegion(ps->dpy, reg_paint, region, t->reg_ignore);
   }
   else {
     reg_paint = region;
@@ -1839,6 +1999,15 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
   reg_tmp2 = XFixesCreateRegion(ps->dpy, NULL, 0);
 
   for (win *w = t; w; w = w->prev_trans) {
+    //char *name;
+    //wid_get_name(ps, w->id, &name);
+    //printf("%d: %d\n", w->widthb, w->to_paint);
+    //XSetWindowAttributes xswa = {
+      //.backing_store = Always,
+      // };
+
+    //XChangeWindowAttributes(ps->dpy, w->id, CWBackingStore, &xswa);
+
     // Painting shadow
     if (w->shadow) {
       // Lazy shadow building
@@ -1937,9 +2106,10 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
           win_blur_background(ps, w, ps->tgt_buffer.pict, reg_paint, &cache_reg);
         }
 
-        // Painting the window
-        win_paint_win(ps, w, reg_paint, &cache_reg);
       }
+
+      // Painting the window
+      win_paint_win(ps, w, reg_paint, &cache_reg);
       free_reg_data(&cache_reg);
     }
   }
@@ -1986,10 +2156,35 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
       }
       // No-DBE painting mode
       else if (ps->tgt_buffer.pict != ps->tgt_picture) {
+        /*if (ps->scale > 1.0) {
+          XTransform xform = {{
+              { XDoubleToFixed( 1.0 ), XDoubleToFixed( 0 ), XDoubleToFixed( 0 ) },
+              { XDoubleToFixed( 0 ), XDoubleToFixed( 1.0 ), XDoubleToFixed( 0 ) },
+              { XDoubleToFixed( 0 ), XDoubleToFixed( 0 ), XDoubleToFixed( 1 / ps->scale ) }
+            }};
+          XRenderSetPictureTransform(ps->dpy, ps->tgt_buffer.pict, &xform);
+          XRenderSetPictureFilter(ps->dpy, ps->tgt_buffer.pict, FilterBilinear, 0, 0);
+        }*/
+
         XRenderComposite(
           ps->dpy, PictOpSrc, ps->tgt_buffer.pict, None,
           ps->tgt_picture, 0, 0, 0, 0,
           0, 0, ps->root_width, ps->root_height);
+
+#ifdef MINI_MAP
+        double scale = 4;
+        XTransform xform = {{
+            { XDoubleToFixed( scale ), XDoubleToFixed( 0 ), XDoubleToFixed( 0 ) },
+            { XDoubleToFixed( 0 ), XDoubleToFixed( scale ), XDoubleToFixed( 0 ) },
+            { XDoubleToFixed( 0 ), XDoubleToFixed( 0 ), XDoubleToFixed(1.0) }
+          }};
+        XRenderSetPictureTransform(ps->dpy, map_buffer_pic, &xform);
+        XRenderSetPictureFilter(ps->dpy, map_buffer_pic, FilterBilinear, 0, 0);
+        XRenderComposite(
+          ps->dpy, PictOpSrc, map_buffer_pic, None,
+          map_picture, 0, 0, 0, 0,
+          0, 0, map_width, map_height);
+#endif
       }
       break;
 #ifdef CONFIG_VSYNC_OPENGL
@@ -2015,12 +2210,14 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
       glx_render(ps, ps->tgt_buffer.ptex, 0, 0, 0, 0,
           ps->root_width, ps->root_height, 0, 1.0, false, false,
           region_real, NULL, NULL);
-      // No break here!
+      // No b
     case BKEND_GLX:
       if (ps->o.glx_use_copysubbuffermesa)
         glx_swap_copysubbuffermesa(ps, region_real);
-      else
+      else {
         glXSwapBuffers(ps->dpy, get_tgt_window(ps));
+        //glXSwapBuffers(ps->dpy, mini_map);
+      }
       break;
 #endif
     default:
@@ -2041,6 +2238,7 @@ paint_all(session_t *ps, XserverRegion region, XserverRegion region_real, win *t
 #endif
 
   XFixesDestroyRegion(ps->dpy, region);
+  ps->scale_changed = false;
 
 #ifdef DEBUG_REPAINT
   print_timestamp(ps);
@@ -2073,7 +2271,7 @@ add_damage(session_t *ps, XserverRegion damage) {
     free_region(ps, &damage);
 
   if (!damage) return;
-  if (ps->all_damage) {
+  if (ps->all_damage && !ps->scale_changed) {
     XFixesUnionRegion(ps->dpy, ps->all_damage, ps->all_damage, damage);
     XFixesDestroyRegion(ps->dpy, damage);
   } else {
@@ -2087,6 +2285,7 @@ repair_win(session_t *ps, win *w) {
     return;
 
   XserverRegion parts;
+  double scale = ps->o.wintype_scale[w->window_type] ? ps->scale : 1.0;
 
   if (!w->damaged) {
     parts = win_extents(ps, w);
@@ -2097,8 +2296,8 @@ repair_win(session_t *ps, win *w) {
     set_ignore_next(ps);
     XDamageSubtract(ps->dpy, w->damage, None, parts);
     XFixesTranslateRegion(ps->dpy, parts,
-      w->a.x + w->a.border_width,
-      w->a.y + w->a.border_width);
+                          (w->a.x + w->a.border_width) / scale,
+                          (w->a.y + w->a.border_width) / scale);
   }
 
   w->damaged = true;
@@ -2667,7 +2866,7 @@ win_on_factor_change(session_t *ps, win *w) {
 /**
  * Process needed window updates.
  */
-static void
+/*static void
 win_upd_run(session_t *ps, win *w, win_upd_t *pupd) {
   if (pupd->shadow) {
     win_determine_shadow(ps, w);
@@ -2685,7 +2884,7 @@ win_upd_run(session_t *ps, win *w, win_upd_t *pupd) {
     win_update_focused(ps, w);
     pupd->focus = false;
   }
-}
+  }*/
 
 /**
  * Update cache data in struct _win that depends on window size.
@@ -3440,7 +3639,7 @@ wid_get_prop_window(session_t *ps, Window wid, Atom aprop) {
  */
 static void
 win_update_focused(session_t *ps, win *w) {
-  bool focused_old = w->focused;
+  // bool focused_old = w->focused;
 
   if (UNSET != w->focused_force) {
     w->focused = w->focused_force;
@@ -4382,6 +4581,7 @@ ev_window_name(session_t *ps, Window wid, char **name) {
 
 static void
 ev_handle(session_t *ps, XEvent *ev) {
+  //printf("Handling event.\n");
   if ((ev->type & 0x7f) != KeymapNotify) {
     discard_ignore(ps, ev->xany.serial);
   }
@@ -4440,6 +4640,22 @@ ev_handle(session_t *ps, XEvent *ev) {
     case PropertyNotify:
       ev_property_notify(ps, (XPropertyEvent *)ev);
       break;
+    case KeyPress:
+      if (ev->xkey.keycode == 67) {
+        ps->reset = true;
+      }
+      break;
+      /*case KeyPress:
+      if (ev->xkey.keycode == 67) { // F1
+        change_scale(ps, (ps->scale - 0.1));
+      }
+      else if (ev->xkey.keycode == 68) { // F2
+        change_scale(ps, (ps->scale + 0.1));
+      }
+      else if (ev->xkey.keycode == 69) { // F3
+        change_scale(ps, 1.0);
+      }
+      break;*/
     default:
       if (ps->shape_exists && ev->type == ps->shape_event) {
         ev_shape_notify(ps, (XShapeEvent *) ev);
@@ -5657,6 +5873,8 @@ parse_config(session_t *ps, struct options_tmp *pcfgtmp) {
           ps->o.wintype_fade[i] = (bool) ival;
         if (config_setting_lookup_bool(setting, "focus", &ival))
           ps->o.wintype_focus[i] = (bool) ival;
+        if (config_setting_lookup_bool(setting, "scale", &ival))
+          ps->o.wintype_scale[i] = (bool) ival;
         config_setting_lookup_float(setting, "opacity",
             &ps->o.wintype_opacity[i]);
       }
@@ -6599,6 +6817,10 @@ init_filters(session_t *ps) {
             return false;
         }
 #endif
+      case NUM_BKEND:
+      default:
+        assert(0);
+        break;
     }
   }
 
@@ -6938,6 +7160,48 @@ cxinerama_upd_scrs(session_t *ps) {
 #endif
 }
 
+static void
+change_scale(struct _session_t *ps, double new_scale) {
+  ps->scale = new_scale;
+  ps->scale_changed = true;
+
+  // Force window stuff to update.
+  win *w;
+  for (w = ps->list; w; w = w->next) {
+    free_wpaint(ps, w);
+    free_region(ps, &w->border_size);
+    free_paint(ps, &w->shadow_paint);
+  }
+
+  rebuild_screen_reg(ps);
+  rebuild_shadow_exclude_reg(ps);
+  free_all_damage_last(ps);
+  force_repaint(ps);
+}
+
+static void
+change_offset(struct _session_t *ps, int new_offset_x, int new_offset_y) {
+  //printf("(%d, %d)\n", new_offset_x, new_offset_y);
+  ps->root_offset_x = new_offset_x;
+  ps->root_offset_y = new_offset_y;
+  ps->scale_changed = true;
+
+  // Force window stuff to update.
+  win *w;
+  for (w = ps->list; w; w = w->next) {
+    free_wpaint(ps, w);
+    free_region(ps, &w->border_size);
+    free_paint(ps, &w->shadow_paint);
+    w->a.x = w->a.x + new_offset_x;
+    w->a.y = w->a.y + new_offset_y;
+  }
+
+  rebuild_screen_reg(ps);
+  rebuild_shadow_exclude_reg(ps);
+  free_all_damage_last(ps);
+  force_repaint(ps);
+}
+
 /**
  * Initialize a session.
  *
@@ -6956,6 +7220,9 @@ session_init(session_t *ps_old, int argc, char **argv) {
     .root = None,
     .root_height = 0,
     .root_width = 0,
+    .root_offset_x = 0,
+    .root_offset_y = 0,
+    .change_offset = change_offset,
     // .root_damage = None,
     .overlay = None,
     .root_tile_fill = false,
@@ -6963,6 +7230,9 @@ session_init(session_t *ps_old, int argc, char **argv) {
     .screen_reg = None,
     .tgt_picture = None,
     .tgt_buffer = PAINT_INIT,
+    .scale = 1.0,
+    .change_scale = change_scale,
+    .scale_changed = false,
     .root_dbe = None,
     .reg_win = None,
     .o = {
@@ -7046,6 +7316,8 @@ session_init(session_t *ps_old, int argc, char **argv) {
       .track_focus = false,
       .track_wdata = false,
       .track_leader = false,
+
+      .wintype_scale = { true },
     },
 
     .pfds_read = NULL,
@@ -7145,6 +7417,8 @@ session_init(session_t *ps_old, int argc, char **argv) {
   ps->o.wintype_focus[WINTYPE_UNKNOWN] = false;
   ps->o.wintype_focus[WINTYPE_NORMAL] = false;
   ps->o.wintype_focus[WINTYPE_UTILITY] = false;
+
+  wintype_arr_enable(ps->o.wintype_scale);
 
   // First pass
   get_cfg(ps, argc, argv, true);
@@ -7356,6 +7630,32 @@ session_init(session_t *ps_old, int argc, char **argv) {
 
   cxinerama_upd_scrs(ps);
 
+  // Initialize minimap
+#ifdef MINI_MAP
+  mini_map = XCreateWindow(
+    ps->dpy,
+    ps->root,
+    1260,
+    790,
+    map_width,
+    map_height,
+    2,
+    0,
+    InputOutput,
+    ps->vis,
+    0,
+    0
+    );
+
+  XStoreName(ps->dpy, mini_map, "Minimap");
+#endif
+  //printf(" %#010lx", mini_map);
+  //XWindowAttributes x_attr;
+
+  //XGetWindowAttributes(ps->dpy, ps->root, &x_attr);
+  //printf("(%d, %d) (%d, %d)\n", x_attr.x, x_attr.y, x_attr.width, x_attr.height);
+
+
   // Create registration window
   if (!ps->reg_win && !register_cm(ps))
     exit(1);
@@ -7373,6 +7673,13 @@ session_init(session_t *ps_old, int argc, char **argv) {
     ps->root_picture = XRenderCreatePicture(ps->dpy, ps->root,
         XRenderFindVisualFormat(ps->dpy, ps->vis),
         CPSubwindowMode, &pa);
+
+#ifdef MINI_MAP
+    map_picture = XRenderCreatePicture(ps->dpy, mini_map,
+        XRenderFindVisualFormat(ps->dpy, ps->vis),
+        CPSubwindowMode, &pa);
+#endif
+
     if (ps->o.paint_on_overlay) {
       ps->tgt_picture = XRenderCreatePicture(ps->dpy, ps->overlay,
           XRenderFindVisualFormat(ps->dpy, ps->vis),
@@ -7441,6 +7748,15 @@ session_init(session_t *ps_old, int argc, char **argv) {
     printf_errfq(1, "(): DBus support not compiled in!");
 #endif
   }
+
+  XGrabKey(ps->dpy, XKeysymToKeycode(ps->dpy, XStringToKeysym("F1")), Mod1Mask,
+           ps->root, True, GrabModeAsync, GrabModeAsync);
+
+  /*XGrabKey(ps->dpy, XKeysymToKeycode(ps->dpy, XStringToKeysym("F2")), Mod1Mask,
+           ps->root, True, GrabModeAsync, GrabModeAsync);
+
+  XGrabKey(ps->dpy, XKeysymToKeycode(ps->dpy, XStringToKeysym("F3")), Mod1Mask,
+           ps->root, True, GrabModeAsync, GrabModeAsync);*/
 
   // Fork to background, if asked
   if (ps->o.fork_after_register) {
@@ -7627,6 +7943,10 @@ session_destroy(session_t *ps) {
     ps->reg_win = None;
   }
 
+#ifdef MINI_MAP
+  XDestroyWindow(ps->dpy, mini_map);
+#endif
+
   // Flush all events
   XSync(ps->dpy, True);
 
@@ -7662,12 +7982,31 @@ static void
 session_run(session_t *ps) {
   win *t;
 
+#ifdef MINI_MAP
+  XMapWindow(ps->dpy, mini_map);
+#endif
+
   if (ps->o.sw_opti)
     ps->paint_tm_offset = get_time_timeval().tv_usec;
 
   ps->reg_ignore_expire = true;
 
   t = paint_preprocess(ps, ps->list);
+
+  //printf("Paint pre-processed.\n");
+      // XSetWindowAttributes xswa = {
+      //  .backing_store = Always,
+      //};
+    /*XWindowAttributes attr;
+
+    XGetWindowAttributes(ps->dpy, w->id, &attr);
+
+    printf("%d ", attr.backing_store);*/
+
+    //XChangeWindowAttributes(ps->dpy, id, CWBackingStore, &xswa);
+    /*char *name;
+    wid_get_name(ps, w->id, &name);
+    printf("%s\n", name);*/
 
   if (ps->redirected)
     paint_all(ps, None, None, t);
@@ -7708,9 +8047,11 @@ session_run(session_t *ps) {
       free_region(ps, &ps->all_damage);
 
     XserverRegion all_damage_orig = None;
-    if (ps->o.resize_damage > 0)
+    if (ps->o.resize_damage > 0) {
       all_damage_orig = copy_region(ps, ps->all_damage);
-    resize_region(ps, ps->all_damage, ps->o.resize_damage);
+      resize_region(ps, ps->all_damage, ps->o.resize_damage);
+    }
+
     if (ps->all_damage && !is_region_empty(ps, ps->all_damage, NULL)) {
       static int paint = 0;
       paint_all(ps, ps->all_damage, all_damage_orig, t);
@@ -7770,6 +8111,7 @@ main(int argc, char **argv) {
       return 1;
     }
     session_run(ps_g);
+    break;
     ps_old = ps_g;
     session_destroy(ps_g);
   }

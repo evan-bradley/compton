@@ -568,6 +568,44 @@ cdbus_process(session_t *ps, DBusMessage *msg) {
       cdbus_reply_bool(ps, msg, true);
     success = true;
   }
+  else if (cdbus_m_ismethod("scale")) {
+    DBusError derr;
+    double new_scale;
+    dbus_error_init(&derr);
+    if (!dbus_message_get_args(msg, &derr,
+                               DBUS_TYPE_DOUBLE, &new_scale,
+                               DBUS_TYPE_INVALID)) {
+      fprintf(stderr, "%s", derr.message);
+      dbus_error_free(&derr);
+      success = false;
+    }
+
+    ps->change_scale(ps, new_scale);
+
+    if (!dbus_message_get_no_reply(msg))
+      cdbus_reply_bool(ps, msg, true);
+    success = true;
+  }
+  else if (cdbus_m_ismethod("offset")) {
+    DBusError derr;
+    int new_offset_x;
+    int new_offset_y;
+    dbus_error_init(&derr);
+    if (!dbus_message_get_args(msg, &derr,
+                               DBUS_TYPE_INT32, &new_offset_x,
+                               DBUS_TYPE_INT32, &new_offset_y,
+                               DBUS_TYPE_INVALID)) {
+      fprintf(stderr, "%s", derr.message);
+      dbus_error_free(&derr);
+      success = false;
+    }
+
+    ps->change_offset(ps, new_offset_x, new_offset_y);
+
+    if (!dbus_message_get_no_reply(msg))
+      cdbus_reply_bool(ps, msg, true);
+    success = true;
+  }
   else if (cdbus_m_ismethod("list_win")) {
     success = cdbus_process_list_win(ps, msg);
   }
@@ -1162,9 +1200,15 @@ cdbus_process_introspect(session_t *ps, DBusMessage *msg) {
     "    </signal>\n"
     "    <method name='reset' />\n"
     "    <method name='repaint' />\n"
+    "    <method name='scale' >\n"
+    "			<arg name=\"scale\" type=\"d\" direction=\"in\"/>\n"
+    "    </method>\n"
+    "    <method name='offset' >\n"
+    "			<arg name=\"x\" type=\"i\" direction=\"in\"/>\n"
+    "			<arg name=\"y\" type=\"i\" direction=\"in\"/>\n"
+    "    </method>\n"
     "  </interface>\n"
     "</node>\n";
-
   cdbus_reply_string(ps, msg, str_introspect);
 
   return true;

@@ -537,6 +537,7 @@ typedef struct {
 struct _timeout_t;
 
 struct _win;
+struct _session_t;
 
 typedef struct _c2_lptr c2_lptr_t;
 
@@ -742,6 +743,11 @@ typedef struct _options_t {
   bool track_wdata;
   /// Whether compton needs to track window leaders.
   bool track_leader;
+
+
+  // === Scale related ===
+  /// Whether to scale certain wintypes.
+  bool wintype_scale[NUM_WINTYPES];
 } options_t;
 
 #ifdef CONFIG_VSYNC_OPENGL
@@ -820,6 +826,12 @@ typedef struct _session_t {
   int root_height;
   /// Width of root window.
   int root_width;
+  /// X offset of windows in the root window.
+  int root_offset_x;
+  /// Y offset of windows in the root window.
+  int root_offset_y;
+  /// Function pointer to change the window scale.
+  void (*change_offset) (struct _session_t *ps, int new_offset_x, int new_offset_y);
   // Damage of root window.
   // Damage root_damage;
   /// X Composite overlay window. Used if <code>--paint-on-overlay</code>.
@@ -837,6 +849,12 @@ typedef struct _session_t {
   Picture tgt_picture;
   /// Temporary buffer to paint to before sending to display.
   paint_t tgt_buffer;
+  /// Scale of the windows on the rendered image.
+  double scale;
+  /// Function pointer to change the window scale.
+  void (*change_scale) (struct _session_t *ps, double new_scale);
+  /// Whether the scale has changed and things need to be readjusted.
+  bool scale_changed;
 #ifdef CONFIG_XSYNC
   XSyncFence tgt_buffer_fence;
 #endif
@@ -1086,6 +1104,8 @@ typedef struct _win {
   Damage damage;
   /// Paint info of the window.
   paint_t paint;
+  /// Paint info of the window for the map.
+  paint_t paint_map;
   /// Bounding shape of the window.
   XserverRegion border_size;
   /// Region of the whole window, shadow region included.
@@ -2402,7 +2422,7 @@ xr_sync_(session_t *ps, Drawable d
     if (!*pfence)
       *pfence = XSyncCreateFence(ps->dpy, d, False);
     if (*pfence) {
-      Bool triggered = False;
+      // Bool triggered = False;
       /* if (XSyncQueryFence(ps->dpy, *pfence, &triggered) && triggered)
         XSyncResetFence(ps->dpy, *pfence); */
       // The fence may fail to be created (e.g. because of died drawable)

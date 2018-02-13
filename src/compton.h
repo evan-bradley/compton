@@ -27,6 +27,19 @@
 #include <errno.h>
 #endif
 
+// == Variables ==
+
+//#define MINI_MAP 1
+#ifdef MINI_MAP
+static Window mini_map;
+Picture map_buffer_pic;
+Picture map_picture;
+Pixmap map_pixmap;
+int map_width = 480;
+int map_height = 300;
+double map_scale = 4.0;
+#endif
+
 // == Functions ==
 
 // inline functions must be made static to compile correctly under clang:
@@ -697,6 +710,12 @@ render_(session_t *ps, int x, int y, int dx, int dy, int wid, int hei,
 #endif
     );
 
+#ifdef MINI_MAP
+static void
+render_map(session_t *ps, int x, int y, int dx, int dy, int wid, int hei,
+           double opacity, bool argb, Picture pict);
+#endif
+
 #ifdef CONFIG_VSYNC_OPENGL_GLSL
 #define \
    render(ps, x, y, dx, dy, wid, hei, opacity, argb, neg, pict, ptex, reg_paint, pcache_reg, pprogram) \
@@ -711,8 +730,17 @@ static inline void
 win_render(session_t *ps, win *w, int x, int y, int wid, int hei,
     double opacity, XserverRegion reg_paint, const reg_data_t *pcache_reg,
     Picture pict) {
-  const int dx = (w ? w->a.x: 0) + x;
-  const int dy = (w ? w->a.y: 0) + y;
+  /*double adjustX = (x / ps->scale) + (ps->root_width / 2) -
+                   (ps->root_width / (ps->scale * 2));
+  double adjustY = (y / ps->scale) + (ps->root_height / 2) -
+                   (ps->root_height/ (ps->scale * 2));
+
+  // Disable for now.
+  adjustX = 0;
+  adjustY = 0;*/
+
+  const int dx = (((w ? w->a.x: 0) + x) / ps->scale);// + ps->root_offset_x;// + adjustX;
+  const int dy = (((w ? w->a.y: 0) + y) / ps->scale);// + ps->root_offset_y;// + adjustY;
   const bool argb = (w && (WMODE_ARGB == w->mode || ps->o.force_win_blend));
   const bool neg = (w && w->invert_color);
 
@@ -727,12 +755,17 @@ set_tgt_clip(session_t *ps, XserverRegion reg, const reg_data_t *pcache_reg) {
     case BKEND_XRENDER:
     case BKEND_XR_GLX_HYBRID:
       XFixesSetPictureClipRegion(ps->dpy, ps->tgt_buffer.pict, 0, 0, reg);
+      //XFixesSetPictureClipRegion(ps->dpy, map_buffer_pic, 0, 0, reg);
       break;
 #ifdef CONFIG_VSYNC_OPENGL
     case BKEND_GLX:
       glx_set_clip(ps, reg, pcache_reg);
       break;
 #endif
+    case NUM_BKEND:
+    default:
+      assert(0);
+      break;
   }
 }
 
@@ -885,8 +918,8 @@ win_on_wtype_change(session_t *ps, win *w);
 static void
 win_on_factor_change(session_t *ps, win *w);
 
-static void
-win_upd_run(session_t *ps, win *w, win_upd_t *pupd);
+// static void
+// win_upd_run(session_t *ps, win *w, win_upd_t *pupd);
 
 static void
 calc_win_size(session_t *ps, win *w);
@@ -1048,6 +1081,21 @@ get_screen_region(session_t *ps) {
   r.height = ps->root_height;
   return XFixesCreateRegion(ps->dpy, &r, 1);
 }
+/**
+ * Get a region of the map size.
+ */
+#ifdef MINI_MAP
+inline static XserverRegion
+get_map_region(session_t *ps) {
+  XRectangle r;
+
+  r.x = 0;
+  r.y = 0;
+  r.width = map_width;
+  r.height = map_height;
+  return XFixesCreateRegion(ps->dpy, &r, 1);
+}
+#endif
 
 /**
  * Resize a region.
@@ -1352,3 +1400,9 @@ session_run(session_t *ps);
 
 static void
 reset_enable(int __attribute__((unused)) signum);
+
+static void
+change_scale(struct _session_t *ps, double new_scale);
+
+static void
+change_offset(struct _session_t *ps, int new_offset_x, int new_offset_y);

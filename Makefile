@@ -16,7 +16,7 @@ INCS =
 OBJS = compton.o
 
 # === Configuration flags ===
-CFG = -std=c99
+CFG = -std=c99 #-DDEBUG_EVENTS #-DDEBUG_REPAINT #-DDEBUG_GLX=1 -DDEBUG_GLX_MARK=1
 
 # ==== Xinerama ====
 # Enables support for --xinerama-shadow-crop
@@ -124,7 +124,7 @@ endif
 LIBS += $(shell pkg-config --libs $(PACKAGES))
 INCS += $(shell pkg-config --cflags $(PACKAGES))
 
-CFLAGS += -Wall
+CFLAGS += -Wall -pg
 
 BINS = compton bin/compton-trans
 MANPAGES = man/compton.1 man/compton-trans.1
